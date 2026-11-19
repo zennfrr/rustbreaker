@@ -1,0 +1,89 @@
+name: Build apps
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build APK
+        run: |
+          mkdir app && cd app
+          npm init -y
+          npm install @capacitor/core@7 @capacitor/android@7
+          npm install -D @capacitor/cli@7
+          mkdir www && cp ../rustbreaker.html www/index.html
+          npx cap init RUSTBREAKER com.rustbreaker.game --web-dir www
+          npx cap add android
+          cd android && chmod +x gradlew && ./gradlew assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/RUSTBREAKER.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: RUSTBREAKER.apk
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build EXE
+        shell: bash
+        run: |
+          mkdir app && cp rustbreaker.html app/index.html && cd app
+          cat > main.js <<'EOF'
+          const { app, BrowserWindow } = require('electron');
+          app.whenReady().then(() => {
+            const w = new BrowserWindow({ width: 1280, height: 800, autoHideMenuBar: true, backgroundColor: '#07090d', title: 'RUSTBREAKER' });
+            w.loadFile('index.html');
+          });
+          app.on('window-all-closed', () => app.quit());
+          EOF
+          cat > package.json <<'EOF'
+          {
+            "name": "rustbreaker",
+            "version": "1.0.0",
+            "description": "RUSTBREAKER",
+            "author": "RUSTBREAKER",
+            "main": "main.js",
+            "build": {
+              "appId": "com.rustbreaker.game",
+              "productName": "RUSTBREAKER",
+              "files": ["index.html", "main.js"],
+              "win": { "target": "portable" }
+            }
+          }
+          EOF
+          npm install -D electron@33 electron-builder@25
+          npx electron-builder --win portable --publish never
+          cp dist/*.exe "$GITHUB_WORKSPACE/RUSTBREAKER.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exe
+          path: RUSTBREAKER.exe
+  release:
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: RUSTBREAKER
+          files: out/*
+          make_latest: true
